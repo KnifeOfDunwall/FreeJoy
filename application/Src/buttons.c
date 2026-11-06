@@ -780,157 +780,76 @@ uint8_t ButtonsReadPhysical(dev_config_t * p_dev_config, uint8_t * p_buf)
 void ButtonsReadLogical (dev_config_t * p_dev_config)
 {
 	// Process regular buttons
+	uint8_t shifts_enabled = 0;
+	for (uint8_t s=0; s<5; s++)
+	{
+		if (p_dev_config->shift_config[s].button >= 0) shifts_enabled = 1;
+	}
+	
 	for (uint8_t i=0; i<MAX_BUTTONS_NUM; i++)
 	{
-		uint8_t shift_num = 0;
+		// collect shifts used by logical buttons bound to this physical button
+		uint8_t shift_mask = 0;
 		
-		// check logical buttons to have shift modificators							// disable if no shift?
-		if (p_dev_config->shift_config[0].button >=0 ||										// or shift_config[*].button ?
-				p_dev_config->shift_config[1].button >=0 ||
-				p_dev_config->shift_config[2].button >=0 ||
-				p_dev_config->shift_config[3].button >=0 ||
-				p_dev_config->shift_config[4].button >=0)	
+		if (shifts_enabled)
 		{
 			for (uint8_t j=0; j<MAX_BUTTONS_NUM; j++)
 			{
-				int8_t btn = p_dev_config->buttons[j].physical_num;
+				uint8_t sm = p_dev_config->buttons[j].shift_modificator;
+				if (p_dev_config->buttons[j].physical_num == i && sm > 0 && sm <= 5)
+				{
+					shift_mask |= 1<<(sm-1);
+				}
+			}
+		}
+		
+		for (uint8_t j=0; j<MAX_BUTTONS_NUM; j++)
+		{
+			if (p_dev_config->buttons[j].physical_num != i) continue;
+			
+			uint8_t sm = p_dev_config->buttons[j].shift_modificator;
+			uint8_t is_active;
+			
+			if (shifts_enabled && sm > 0 && sm <= 5)
+			{
+				// shifted logical button: active only while its shift is pressed
+				is_active = (shifts_state & (1<<(sm-1))) ? 1 : 0;
+			}
+			else
+			{
+				// unshifted logical button: inactive only while a shift that has
+				// an alternative mapping for this physical button is pressed
+				is_active = (shifts_state & shift_mask) == 0;
+			}
+			
+			if (is_active)
+			{
+				logical_buttons_state[j].prev_physical_state = logical_buttons_state[j].curr_physical_state;
+				logical_buttons_state[j].curr_physical_state = physical_buttons_state[i].current_state;
 				
-				if (btn == i && (p_dev_config->buttons[j].shift_modificator))				// we found button with shift modificator 
-				{
-					shift_num = p_dev_config->buttons[j].shift_modificator;
-					if (shifts_state & 1<<(shift_num-1))											// shift pressed for this button
-					{
-						logical_buttons_state[j].prev_physical_state = logical_buttons_state[j].curr_physical_state;
-						logical_buttons_state[j].curr_physical_state = physical_buttons_state[p_dev_config->buttons[j].physical_num].current_state;
-						
-						LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
-					}
-					else if (logical_buttons_state[j].current_state)	// shift released for this button
-					{
-						// disable button
-						logical_buttons_state[j].delay_act = BUTTON_ACTION_IDLE;
-						logical_buttons_state[j].on_state = 0;
-						logical_buttons_state[j].off_state = 0;
-						logical_buttons_state[j].current_state = 0;
-						logical_buttons_state[j].curr_physical_state = 0;
-						logical_buttons_state[j].time_last = 0;			
-						LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
-					}
-				}
+				LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
+			}
+			else if (logical_buttons_state[j].current_state)
+			{
+				// disable button
+				logical_buttons_state[j].delay_act = BUTTON_ACTION_IDLE;
+				logical_buttons_state[j].on_state = 0;
+				logical_buttons_state[j].off_state = 0;
+				logical_buttons_state[j].current_state = 0;
+				logical_buttons_state[j].curr_physical_state = 0;
+				logical_buttons_state[j].time_last = 0;
+				LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
 			}
 		}
-		
-		if (shift_num == 0)		// we found not shift modificated physical button
-		{
-			for (uint8_t j=0; j<MAX_BUTTONS_NUM; j++)
-			{
-				if (p_dev_config->buttons[j].physical_num == i)		// we found corresponding logical button
-				{
-					logical_buttons_state[j].prev_physical_state = logical_buttons_state[j].curr_physical_state;
-					logical_buttons_state[j].curr_physical_state = physical_buttons_state[p_dev_config->buttons[j].physical_num].current_state;		
-					
-					LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
-				}
-			}
-		}		
-		else	// check if shift is released for modificated physical button
-		{
-			for (uint8_t j=0; j<MAX_BUTTONS_NUM; j++)
-			{
-				if (p_dev_config->buttons[j].physical_num == i && (shifts_state) == 0 &&
-					(p_dev_config->buttons[j].shift_modificator) == 0)
-				{
-					logical_buttons_state[j].prev_physical_state = logical_buttons_state[j].curr_physical_state;
-					logical_buttons_state[j].curr_physical_state = physical_buttons_state[p_dev_config->buttons[j].physical_num].current_state;
-					
-					LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
-				}
-				// shift pressed
-				else if (p_dev_config->buttons[j].physical_num == i && shifts_state & (1<<0) &&
-					(p_dev_config->buttons[j].shift_modificator) == 0)
-				{
-					// disable button
-					if (logical_buttons_state[j].current_state)	
-					{
-						logical_buttons_state[j].delay_act = BUTTON_ACTION_IDLE;
-						logical_buttons_state[j].on_state = 0;
-						logical_buttons_state[j].off_state = 0;
-						logical_buttons_state[j].current_state = 0;
-						logical_buttons_state[j].curr_physical_state = 0;
-						logical_buttons_state[j].time_last = 0;
-						LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
-					}	
-				}
-				else if (p_dev_config->buttons[j].physical_num == i && shifts_state & (1<<1)	&&
-					(p_dev_config->buttons[j].shift_modificator) == 0)
-				{
-					// disable button
-					if (logical_buttons_state[j].current_state)	
-					{
-						logical_buttons_state[j].delay_act = BUTTON_ACTION_IDLE;
-						logical_buttons_state[j].on_state = 0;
-						logical_buttons_state[j].off_state = 0;
-						logical_buttons_state[j].current_state = 0;	
-						logical_buttons_state[j].curr_physical_state = 0;
-						logical_buttons_state[j].time_last = 0;						
-						LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
-					}		
-				}
-				else if (p_dev_config->buttons[j].physical_num == i && shifts_state & (1<<2) &&
-					(p_dev_config->buttons[j].shift_modificator) == 0)
-				{
-					// disable button
-					if (logical_buttons_state[j].current_state)	
-					{
-						logical_buttons_state[j].delay_act = BUTTON_ACTION_IDLE;
-						logical_buttons_state[j].on_state = 0;
-						logical_buttons_state[j].off_state = 0;
-						logical_buttons_state[j].current_state = 0;	
-						logical_buttons_state[j].curr_physical_state = 0;						
-						logical_buttons_state[j].time_last = 0;						
-						LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
-					}	
-				}
-				else if (p_dev_config->buttons[j].physical_num == i && shifts_state & (1<<3) &&
-					(p_dev_config->buttons[j].shift_modificator) == 0)
-				{
-					// disable button
-					if (logical_buttons_state[j].current_state)	
-					{
-						logical_buttons_state[j].delay_act = BUTTON_ACTION_IDLE;
-						logical_buttons_state[j].on_state = 0;
-						logical_buttons_state[j].off_state = 0;
-						logical_buttons_state[j].current_state = 0;
-						logical_buttons_state[j].curr_physical_state = 0;
-						logical_buttons_state[j].time_last = 0;									
-						LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
-					}		
-				}
-				else if (p_dev_config->buttons[j].physical_num == i && shifts_state & (1<<4) &&
-					(p_dev_config->buttons[j].shift_modificator) == 0)
-				{
-					// disable button
-					if (logical_buttons_state[j].current_state)	
-					{
-						logical_buttons_state[j].delay_act = BUTTON_ACTION_IDLE;
-						logical_buttons_state[j].on_state = 0;
-						logical_buttons_state[j].off_state = 0;
-						logical_buttons_state[j].current_state = 0;
-						logical_buttons_state[j].curr_physical_state = 0;
-						logical_buttons_state[j].time_last = 0;									
-						LogicalButtonProcessState(&logical_buttons_state[j], pov_pos, p_dev_config, j);
-					}	
-				}
-			}
-		}
-	}	
+	}
 	
 	shifts_state = 0;
 	for (uint8_t i=0; i<5; i++)
 	{
 		if (p_dev_config->shift_config[i].button >= 0)
 		{				
-			shifts_state |= (logical_buttons_state[p_dev_config->shift_config[i].button].current_state << i);
+			shifts_state |= ((logical_buttons_state[p_dev_config->shift_config[i].button].current_state ^
+											 (p_dev_config->buttons[p_dev_config->shift_config[i].button].is_inverted ? 1 : 0)) << i);
 		}
 	}
 	
